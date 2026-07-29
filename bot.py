@@ -67,6 +67,77 @@ def user_order_summary(order):
     )
 
 
+# ─── Admin Panel ───
+
+def admin_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⏳ Pending Orders", callback_data="admin_pending"),
+         InlineKeyboardButton("🏦 Balance", callback_data="admin_balance")],
+        [InlineKeyboardButton("📊 Stats", callback_data="admin_stats"),
+         InlineKeyboardButton("🔄 Refresh", callback_data="admin_refresh")],
+    ])
+
+
+async def send_admin_panel(target, context):
+    rev = total_revenue()
+    ocount = total_orders()
+    pending = get_pending_payment_orders()
+    processing = get_processing_orders()
+    panel = get_balance()
+    panel_bal = f"${float(panel['balance']):.2f}" if panel and 'balance' in panel else "Error"
+
+    text = (
+        f"*Admin Panel*\n\n"
+        f"💰 Revenue: ${rev/100:.2f}\n"
+        f"📦 Orders: {ocount}\n"
+        f"⏳ Awaiting payment: {len(pending)}\n"
+        f"🔄 Processing: {len(processing)}\n"
+        f"🏦 Panel balance: {panel_bal}\n\n"
+        f"Commands:\n"
+        f"`/senddetails <id> <info>` — send payment info\n"
+        f"`/confirm <id>` — confirm & process\n"
+        f"`/forceconfirm <id>` — force process\n"
+        f"`/pending` — list all pending"
+    )
+
+    if hasattr(target, 'edit_message_text'):
+        await target.edit_message_text(text, parse_mode='Markdown', reply_markup=admin_keyboard())
+    else:
+        await target.reply_text(text, parse_mode='Markdown', reply_markup=admin_keyboard())
+
+
+async def admin_panel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_admin_panel(update.message, context)
+
+
+async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    action = query.data
+
+    if action in ('admin_refresh', 'admin_stats'):
+        await send_admin_panel(query, context)
+
+    elif action == 'admin_pending':
+        orders = get_pending_payment_orders()
+        if not orders:
+            await query.edit_message_text("No pending orders.", reply_markup=admin_keyboard())
+            return
+        lines = ["*Pending Orders*\n"]
+        for o in orders[:10]:
+            lines.append(
+                f"`#{o['id']}` {o['service_name']}\n"
+                f"   ${o['amount_cents']/100:.2f} | {o.get('payment_method','?')} | `{o['telegram_id']}`"
+            )
+        lines.append("\n/pending for full list")
+        await query.edit_message_text('\n'.join(lines), parse_mode='Markdown', reply_markup=admin_keyboard())
+
+    elif action == 'admin_balance':
+        result = get_balance()
+        bal = f"${float(result['balance']):.2f}" if result and 'balance' in result else "Error"
+        await query.edit_message_text(f"*Panel Balance:* {bal}", parse_mode='Markdown', reply_markup=admin_keyboard())
+
+
 # ─── Command Handlers ───
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -583,26 +654,13 @@ async def cancel_order_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    is_admin = user.id in ADMIN_IDS
-
-    text = (
-        "📚 *Commands*\n\n"
-        "/start — Browse & order\n"
-        "/orders — Your order history\n\n"
+    await update.message.reply_text(
+        "📚 *Help*\n\n"
+        "/start — Browse services & order\n"
+        "/orders — Your order history\n"
+        "/help — Show this message",
+        parse_mode='Markdown'
     )
-    if is_admin:
-        text += (
-            "*Admin:*\n"
-            "/stats — Dashboard\n"
-            "/balance — Panel balance\n"
-            "/pending — List pending orders\n"
-            "/senddetails <id> <info> — Give user payment details\n"
-            "/confirm <id> — Confirm payment & process\n"
-            "/forceconfirm <id> — Override & process\n"
-        )
-
-    await update.message.reply_text(text, parse_mode='Markdown')
 
 
 # ─── Error Handler ───
@@ -750,26 +808,39 @@ def main():
 
     app = Application.builder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("orders", my_orders))
-    app.add_handler(CommandHandler("balance", balance_cmd))
-    app.add_handler(CommandHandler("stats", admin_stats))
-    app.add_handler(CommandHandler("pending", pending_orders))
-    app.add_handler(CommandHandler("confirm", confirm_payment))
-    app.add_handler(CommandHandler("forceconfirm", force_confirm))
-    app.add_handler(CommandHandler("senddetails", send_details))
-    app.add_handler(CommandHandler("help", help_cmd))
+    admin_filter  = filters.User(user_ids=ADMIN_IDS)
+    client_filter = ~admin_filter
 
-    app.add_handler(CallbackQueryHandler(select_platform, pattern=r'^plat_'))
-    app.add_handler(CallbackQueryHandler(select_package, pattern=r'^select_'))
-    app.add_handler(CallbackQueryHandler(choose_paypal, pattern=r'^pay_paypal$'))
-    app.add_handler(CallbackQueryHandler(choose_manual, pattern=r'^pay_manual$'))
-    app.add_handler(CallbackQueryHandler(notify_paid, pattern=r'^notify_paid_'))
-    app.add_handler(CallbackQueryHandler(services_menu, pattern=r'^back_platform$'))
+    # ─── Client commands ───
+    app.add_handler(CommandHandler("start",  start,    filters=client_filter))
+    app.add_handler(CommandHandler("orders", my_orders, filters=client_filter))
+    app.add_handler(CommandHandler("help",   help_cmd,  filters=client_filter))
+
+    # ─── Admin commands ───
+    app.add_handler(CommandHandler("admin",        admin_panel_cmd,   filters=admin_filter))
+    app.add_handler(CommandHandler("start",        admin_panel_cmd,   filters=admin_filter))
+    app.add_handler(CommandHandler("balance",      balance_cmd,       filters=admin_filter))
+    app.add_handler(CommandHandler("stats",        admin_stats,       filters=admin_filter))
+    app.add_handler(CommandHandler("pending",      pending_orders,    filters=admin_filter))
+    app.add_handler(CommandHandler("confirm",      confirm_payment,   filters=admin_filter))
+    app.add_handler(CommandHandler("forceconfirm", force_confirm,     filters=admin_filter))
+    app.add_handler(CommandHandler("senddetails",  send_details,      filters=admin_filter))
+
+    # ─── Client callbacks ───
+    app.add_handler(CallbackQueryHandler(select_platform,  pattern=r'^plat_'))
+    app.add_handler(CallbackQueryHandler(select_package,   pattern=r'^select_'))
+    app.add_handler(CallbackQueryHandler(choose_paypal,    pattern=r'^pay_paypal$'))
+    app.add_handler(CallbackQueryHandler(choose_manual,    pattern=r'^pay_manual$'))
+    app.add_handler(CallbackQueryHandler(notify_paid,      pattern=r'^notify_paid_'))
+    app.add_handler(CallbackQueryHandler(services_menu,    pattern=r'^back_platform$'))
     app.add_handler(CallbackQueryHandler(cancel_order_cmd, pattern=r'^cancel_order$'))
 
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_details))
+    # ─── Admin callbacks ───
+    app.add_handler(CallbackQueryHandler(admin_callback, pattern=r'^admin_'))
+
+    # ─── Message handlers (isolated) ───
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & client_filter, handle_link))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & admin_filter,  handle_admin_details))
 
     app.add_error_handler(error_handler)
 
