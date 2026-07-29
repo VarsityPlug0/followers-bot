@@ -140,33 +140,23 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ─── Command Handlers ───
 
-BANNER_PATH = os.path.join(os.path.dirname(__file__), 'banner.png')
+BANNER_URL = "https://raw.githubusercontent.com/VarsityPlug0/followers-bot/master/banner.png"
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_or_create_user(user.id, user.username or user.first_name)
 
-    if os.path.exists(BANNER_PATH):
-        with open(BANNER_PATH, 'rb') as f:
-            await update.message.reply_photo(
-                photo=f,
-                caption=(
-                    "👋 *Welcome to GrowthBoost!*\n\n"
-                    "Get real Instagram & TikTok followers and likes delivered fast.\n\n"
-                    "👇 Select a service to get started:"
-                ),
-                parse_mode='Markdown',
-                reply_markup=platform_keyboard()
-            )
-    else:
-        await update.message.reply_text(
+    await update.message.reply_photo(
+        photo=BANNER_URL,
+        caption=(
             "👋 *Welcome to GrowthBoost!*\n\n"
             "Get real Instagram & TikTok followers and likes delivered fast.\n\n"
-            "👇 Select a service to get started:",
-            parse_mode='Markdown',
-            reply_markup=platform_keyboard()
-        )
+            "👇 Select a service to get started:"
+        ),
+        parse_mode='Markdown',
+        reply_markup=platform_keyboard()
+    )
 
 
 async def services_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
