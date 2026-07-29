@@ -4,6 +4,9 @@
 # ============================================
 
 import logging
+import os
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -610,8 +613,24 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ─── Main ───
 
+def _run_health_server():
+    port = int(os.environ.get('PORT', 8080))
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'OK')
+        def log_message(self, *args):
+            pass
+
+    HTTPServer(('0.0.0.0', port), Handler).serve_forever()
+
+
 def main():
     init_db()
+
+    threading.Thread(target=_run_health_server, daemon=True).start()
 
     app = Application.builder().token(BOT_TOKEN).build()
 
