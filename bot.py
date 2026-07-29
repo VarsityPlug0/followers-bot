@@ -17,9 +17,9 @@ from config import BOT_TOKEN, ADMIN_IDS, SERVICES, PAYPAL_ME_LINK
 from database import (
     init_db, get_or_create_user, create_order, update_order_panel_id,
     update_order_status, get_order, get_user_orders, get_pending_payment_orders,
-    add_transaction, total_revenue, total_orders
+    add_transaction, total_revenue, total_orders, get_processing_orders
 )
-from panel_api import place_order, get_balance
+from panel_api import place_order, get_balance, order_status, multi_status
 
 # ─── Setup ───
 
@@ -611,6 +611,122 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.error(f"Update {update} caused error {context.error}")
 
 
+# ─── Automated Jobs ───
+
+LOW_BALANCE_THRESHOLD = 5.00  # alert when panel credit drops below $5
+_balance_alerted = False       # avoid spamming the same alert
+
+
+async def job_check_order_statuses(context):
+    """Every 5 min: poll panel for processing orders, notify customers on completion."""
+    orders = get_processing_orders()
+    if not orders:
+        return
+
+    # Batch-check up to 100 orders at once
+    ids = [o['panel_order_id'] for o in orders if o.get('panel_order_id')]
+    if not ids:
+        return
+
+    statuses = multi_status(ids) if len(ids) > 1 else {str(ids[0]): order_status(ids[0])}
+    if not statuses or 'error' in statuses:
+        return
+
+    for order in orders:
+        pid = order.get('panel_order_id')
+        if not pid:
+            continue
+        info = statuses.get(str(pid), {})
+        panel_status = info.get('status', '').lower()
+
+        if panel_status in ('completed', 'partial', 'canceled'):
+            update_order_status(order['id'], panel_status)
+
+            status_msg = {
+                'completed': '✅ *Order Complete!*\n\nYour followers/likes have been delivered.',
+                'partial':   '⚠️ *Partial Delivery*\n\nYour order was partially fulfilled. Contact support if needed.',
+                'canceled':  '❌ *Order Canceled*\n\nYour order was canceled by the provider. Contact support.',
+            }.get(panel_status, '')
+
+            if status_msg:
+                try:
+                    svc_name = order.get('service_name', '')
+                    link = order.get('link', '')
+                    await context.bot.send_message(
+                        order['telegram_id'],
+                        f"{status_msg}\n\n*Service:* {svc_name}\n*Link:* `{link}`",
+                        parse_mode='Markdown'
+                    )
+                except Exception as e:
+                    logging.error(f"Failed to notify user {order['telegram_id']}: {e}")
+
+            # Notify admin of cancellations
+            if panel_status == 'canceled':
+                for admin_id in ADMIN_IDS:
+                    try:
+                        await context.bot.send_message(
+                            admin_id,
+                            f"⚠️ *Order #{order['id']} Canceled by Panel*\n"
+                            f"Service: {order.get('service_name')}\n"
+                            f"Link: `{link}`\n"
+                            f"Consider refunding or reordering.",
+                            parse_mode='Markdown'
+                        )
+                    except Exception:
+                        pass
+
+
+async def job_balance_check(context):
+    """Every hour: alert admin if panel balance is low."""
+    global _balance_alerted
+    result = get_balance()
+    if not result or 'balance' in result is False:
+        return
+
+    balance = float(result.get('balance', 0))
+
+    if balance < LOW_BALANCE_THRESHOLD and not _balance_alerted:
+        _balance_alerted = True
+        for admin_id in ADMIN_IDS:
+            try:
+                await context.bot.send_message(
+                    admin_id,
+                    f"🔴 *Low Panel Balance!*\n\n"
+                    f"Balance: *${balance:.2f}*\n"
+                    f"Top up at justanotherpanel.com to keep orders processing.",
+                    parse_mode='Markdown'
+                )
+            except Exception:
+                pass
+    elif balance >= LOW_BALANCE_THRESHOLD:
+        _balance_alerted = False  # reset so future drops trigger again
+
+
+async def job_daily_summary(context):
+    """Every day at 8am: send admin a stats digest."""
+    rev = total_revenue()
+    ocount = total_orders()
+    pending = get_pending_payment_orders()
+    processing = get_processing_orders()
+    panel = get_balance()
+    panel_bal = f"${float(panel['balance']):.2f}" if panel and 'balance' in panel else "Error"
+
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_message(
+                admin_id,
+                f"📊 *Daily Summary*\n\n"
+                f"💰 Total Revenue: ${rev/100:.2f}\n"
+                f"📦 Total Orders: {ocount}\n"
+                f"⏳ Awaiting Payment: {len(pending)}\n"
+                f"🔄 Processing: {len(processing)}\n"
+                f"🏦 Panel Balance: {panel_bal}",
+                parse_mode='Markdown'
+            )
+        except Exception:
+            pass
+
+
 # ─── Main ───
 
 def _run_health_server():
@@ -656,6 +772,12 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_details))
 
     app.add_error_handler(error_handler)
+
+    # ─── Scheduled Jobs ───
+    jq = app.job_queue
+    jq.run_repeating(job_check_order_statuses, interval=300, first=60)   # every 5 min
+    jq.run_repeating(job_balance_check, interval=3600, first=120)         # every hour
+    jq.run_daily(job_daily_summary, time=__import__('datetime').time(8, 0, 0))  # 8am UTC
 
     print("[+] Follower Bot (PayPal + Manual) is running...")
     app.run_polling()

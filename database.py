@@ -131,6 +131,15 @@ def get_pending_orders():
     return [dict(r) for r in rows]
 
 
+def get_processing_orders():
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT * FROM orders WHERE status = "processing" AND panel_order_id IS NOT NULL ORDER BY created_at ASC'
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 # ─── Transactions ───
 
 def add_transaction(telegram_id, ttype, amount_cents, stripe_session_id=None, description=None):
