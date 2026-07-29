@@ -13,7 +13,7 @@ from telegram.ext import (
     MessageHandler, filters, ContextTypes
 )
 
-from config import BOT_TOKEN, ADMIN_IDS, SERVICES, PAYPAL_ME_LINK
+from config import BOT_TOKEN, ADMIN_IDS, ADMIN_PASSWORD, SERVICES, PAYPAL_ME_LINK
 from database import (
     init_db, get_or_create_user, create_order, update_order_panel_id,
     update_order_status, get_order, get_user_orders, get_pending_payment_orders,
@@ -67,6 +67,15 @@ def user_order_summary(order):
     )
 
 
+# ─── Admin Session ───
+
+active_admin_sessions: set = set()  # user_ids that have authenticated this runtime
+
+
+def is_admin_authed(user_id: int) -> bool:
+    return user_id in active_admin_sessions
+
+
 # ─── Admin Panel ───
 
 def admin_keyboard():
@@ -75,6 +84,7 @@ def admin_keyboard():
          InlineKeyboardButton("🏦 Balance", callback_data="admin_balance")],
         [InlineKeyboardButton("📊 Stats", callback_data="admin_stats"),
          InlineKeyboardButton("🔄 Refresh", callback_data="admin_refresh")],
+        [InlineKeyboardButton("🚪 Exit Admin", callback_data="admin_exit")],
     ])
 
 
@@ -107,13 +117,51 @@ async def send_admin_panel(target, context):
 
 
 async def admin_panel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    args = context.args
+
+    # /admin <password> to authenticate
+    if not is_admin_authed(user.id):
+        if args and args[0] == ADMIN_PASSWORD:
+            active_admin_sessions.add(user.id)
+            await update.message.reply_text("*Admin session started.*", parse_mode='Markdown')
+            await send_admin_panel(update.message, context)
+        else:
+            await update.message.reply_text("Password required: `/admin <password>`", parse_mode='Markdown')
+        return
+
     await send_admin_panel(update.message, context)
+
+
+async def exit_admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    active_admin_sessions.discard(user.id)
+    await update.message.reply_photo(
+        photo=BANNER_URL,
+        caption=(
+            "👋 *Welcome to GrowthBoost!*\n\n"
+            "Get real Instagram & TikTok followers and likes delivered fast.\n\n"
+            "👇 Select a service to get started:"
+        ),
+        parse_mode='Markdown',
+        reply_markup=platform_keyboard()
+    )
 
 
 async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     action = query.data
+    user = update.effective_user
+
+    if action == 'admin_exit':
+        active_admin_sessions.discard(user.id)
+        await query.edit_message_text("Admin session ended. Use /start to browse as a client.")
+        return
+
+    if not is_admin_authed(user.id):
+        await query.edit_message_text("Session expired. Use `/admin <password>` to log in again.", parse_mode='Markdown')
+        return
 
     if action in ('admin_refresh', 'admin_stats'):
         await send_admin_panel(query, context)
@@ -332,7 +380,8 @@ async def choose_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_admin_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin replies with payment details for a manual order."""
     user = update.effective_user
-    if user.id not in ADMIN_IDS:
+    if not is_admin_authed(user.id):
+        await update.message.reply_text("Session expired. Use `/admin <password>` to log in.", parse_mode='Markdown')
         return
 
     # Check if this is a reply to the bot's message about a manual order
@@ -355,7 +404,8 @@ async def handle_admin_details(update: Update, context: ContextTypes.DEFAULT_TYP
 async def send_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command: /senddetails <order_id> <payment details>"""
     user = update.effective_user
-    if user.id not in ADMIN_IDS:
+    if not is_admin_authed(user.id):
+        await update.message.reply_text("Session expired. Use `/admin <password>` to log in.", parse_mode='Markdown')
         return
 
     args = context.args
@@ -533,7 +583,8 @@ async def confirm_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def force_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    if user.id not in ADMIN_IDS:
+    if not is_admin_authed(user.id):
+        await update.message.reply_text("Session expired. Use `/admin <password>` to log in.", parse_mode='Markdown')
         return
 
     args = context.args
@@ -580,7 +631,8 @@ async def force_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def pending_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    if user.id not in ADMIN_IDS:
+    if not is_admin_authed(user.id):
+        await update.message.reply_text("Session expired. Use `/admin <password>` to log in.", parse_mode='Markdown')
         return
 
     orders = get_pending_payment_orders()
@@ -620,7 +672,8 @@ async def my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def balance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    if user.id not in ADMIN_IDS:
+    if not is_admin_authed(user.id):
+        await update.message.reply_text("Session expired. Use `/admin <password>` to log in.", parse_mode='Markdown')
         return
 
     result = get_balance()
@@ -632,7 +685,8 @@ async def balance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    if user.id not in ADMIN_IDS:
+    if not is_admin_authed(user.id):
+        await update.message.reply_text("Session expired. Use `/admin <password>` to log in.", parse_mode='Markdown')
         return
 
     rev = total_revenue()
@@ -667,6 +721,18 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/help — Show this message",
         parse_mode='Markdown'
     )
+
+
+async def handle_admin_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Route admin text messages: admin details flow if authed, else prompt to log in."""
+    user = update.effective_user
+    if not is_admin_authed(user.id):
+        await update.message.reply_text(
+            "Use `/admin <password>` to access the admin panel.",
+            parse_mode='Markdown'
+        )
+        return
+    await handle_admin_details(update, context)
 
 
 # ─── Error Handler ───
@@ -822,9 +888,10 @@ def main():
     app.add_handler(CommandHandler("orders", my_orders, filters=client_filter))
     app.add_handler(CommandHandler("help",   help_cmd,  filters=client_filter))
 
-    # ─── Admin commands ───
+    # ─── Admin commands (Telegram ID gate; password gate inside handlers) ───
     app.add_handler(CommandHandler("admin",        admin_panel_cmd,   filters=admin_filter))
     app.add_handler(CommandHandler("start",        admin_panel_cmd,   filters=admin_filter))
+    app.add_handler(CommandHandler("exit",         exit_admin_cmd,    filters=admin_filter))
     app.add_handler(CommandHandler("balance",      balance_cmd,       filters=admin_filter))
     app.add_handler(CommandHandler("stats",        admin_stats,       filters=admin_filter))
     app.add_handler(CommandHandler("pending",      pending_orders,    filters=admin_filter))
@@ -845,8 +912,9 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_callback, pattern=r'^admin_'))
 
     # ─── Message handlers (isolated) ───
+    # Admin text messages only routed to admin handler when session is active (checked inside)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & client_filter, handle_link))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & admin_filter,  handle_admin_details))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & admin_filter,  handle_admin_msg))
 
     app.add_error_handler(error_handler)
 

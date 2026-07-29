@@ -13,7 +13,8 @@ PAYPAL_ME_LINK = 'paypal.me/BevanNdzhaka'
 BOT_TOKEN = '8846997044:AAFHFa2v0I67WoWhNJwHkCxQMghS7pqYdEU'
 
 # --- Admin ---
-ADMIN_IDS = [8558050560]  # @BevanNdzhaka
+ADMIN_IDS = [8558050560]  # @BevanNdzhaka — only these IDs can attempt /admin
+ADMIN_PASSWORD = "GrowthBoost@2026"  # change this
 
 # --- Service Mapping ---
 # panel_id verified against justanotherpanel.com API
