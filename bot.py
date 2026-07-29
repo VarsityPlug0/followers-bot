@@ -814,7 +814,7 @@ def main():
 
     app = Application.builder().token(BOT_TOKEN).build()
 
-    admin_filter  = filters.User(user_ids=ADMIN_IDS)
+    admin_filter  = filters.User(ADMIN_IDS)
     client_filter = ~admin_filter
 
     # ─── Client commands ───
