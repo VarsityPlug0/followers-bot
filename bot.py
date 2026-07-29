@@ -724,13 +724,10 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_admin_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Route admin text messages: admin details flow if authed, else prompt to log in."""
+    """When admin session active: route to admin details flow. Otherwise treat as client."""
     user = update.effective_user
     if not is_admin_authed(user.id):
-        await update.message.reply_text(
-            "Use `/admin <password>` to access the admin panel.",
-            parse_mode='Markdown'
-        )
+        await handle_link(update, context)
         return
     await handle_admin_details(update, context)
 
