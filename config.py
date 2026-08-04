@@ -7,13 +7,13 @@ PANEL_API_URL = 'https://justanotherpanel.com/api/v2'
 PANEL_API_KEY = 'fc23aad33a38ec354c4352b68ef462a6'
 
 # --- Payment Settings ---
-PAYPAL_ME_LINK = 'paypal.me/BevanNdzhaka'
+PAYPAL_ME_LINK = 'paypal.me/GrowthBoostSMM'
 
 # --- Telegram Bot ---
 BOT_TOKEN = '8846997044:AAFHFa2v0I67WoWhNJwHkCxQMghS7pqYdEU'
 
 # --- Admin ---
-ADMIN_IDS = [8558050560]  # @BevanNdzhaka — only these IDs can attempt /admin
+ADMIN_IDS = [8558050560]  # only these IDs can attempt /admin
 ADMIN_PASSWORD = "GrowthBoost@2026"  # change this
 
 # --- Service Mapping ---

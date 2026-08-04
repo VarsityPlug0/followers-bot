@@ -366,7 +366,7 @@ async def choose_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Link: `{link}`\n"
                 f"Amount: {price}\n\n"
                 f"➡️ *Reply with the payment details to send to the user:*\n"
-                f"   e.g. `Capitec - Bevan Ndzhaka - 1234567890`\n"
+                f"   e.g. `Capitec - Account Holder - 1234567890`\n"
                 f"   or `BTC: bc1qxyz...`\n"
                 f"   or *anything you want the user to pay to*",
                 parse_mode='Markdown'
@@ -395,7 +395,7 @@ async def handle_admin_details(update: Update, context: ContextTypes.DEFAULT_TYP
     # OR we check bot_data for the most recent awaiting_details
     await update.message.reply_text(
         "Use: `/senddetails <order_id> <payment info>`\n"
-        "Example: `/senddetails 42 Capitec - Bevan - 1234567890`\n\n"
+        "Example: `/senddetails 42 Capitec - Account Holder - 1234567890`\n\n"
         "Or: `/senddetails 42 BTC: bc1qabc123def456`",
         parse_mode='Markdown'
     )
@@ -412,7 +412,7 @@ async def send_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(args) < 2:
         await update.message.reply_text(
             "Usage: `/senddetails <order_id> <payment info>`\n"
-            "Example: `/senddetails 42 Capitec - Bevan - 1234567890`",
+            "Example: `/senddetails 42 Capitec - Account Holder - 1234567890`",
             parse_mode='Markdown'
         )
         return
